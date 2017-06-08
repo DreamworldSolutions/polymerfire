@@ -84,6 +84,7 @@ https://github.com/firebase/polymerfire/blob/master/LICENSE
           resolve(this._setFirebaseValue(path, this.data));
         } else {
           if(this.readOnly){
+            reject('This is unexpected condition.');
             return;
           }
 
