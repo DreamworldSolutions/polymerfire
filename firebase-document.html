@@ -7,6 +7,7 @@ https://github.com/firebase/polymerfire/blob/master/LICENSE
 -->
 
 <link rel="import" href="../polymer/polymer.html">
+<link rel="import" href="../js-lib-imports/lo-dash-3.0.0.html">
 <link rel="import" href="firebase-database-behavior.html">
 <script>
   'use strict';
@@ -188,16 +189,9 @@ https://github.com/firebase/polymerfire/blob/master/LICENSE
 
             // now, we loop over keys
             for (var prop in value) {
-              if(value[prop] !== this.data[prop]) {
-                if(window._ && window._.isObject(value[prop])) {
-                  //Set complex value only if both objects have different value
-                  if(!_.isEqual(value[prop], this.data[prop])) {
-                      this.set(['data', prop], value[prop]);
-                  }
-                }else {
-                  //Set premitives value
+              //Compare data by value instead of reference and its not same then only set on 'data'
+              if(!window._.isEqual(value[prop], this.data[prop])) {
                   this.set(['data', prop], value[prop]);
-                }
               }
             }
           });
