@@ -31,10 +31,22 @@ https://github.com/firebase/polymerfire/blob/master/LICENSE
    * `<firebase-document>` needs some information about how to talk to Firebase.
    * Set this configuration by adding a `<firebase-app>` element anywhere in your
    * app.
+   * 
+   * Set 'window.retryDataFromFirebaseOnPermissionDenied' as true to set global config
+   * for retry to load data from firebase
    */
   Polymer({
     is: 'firebase-document',
-
+    properties: {
+      /**
+      * When true, retry to load data from firebase in some incremently time(in seconds) (1,2,4,8,16,32). 
+      */
+      retryOnError:{
+        type: Boolean,
+        value: false  
+      }
+    },
+    
     behaviors: [
       Polymer.FirebaseDatabaseBehavior
     ],
@@ -45,8 +57,13 @@ https://github.com/firebase/polymerfire/blob/master/LICENSE
     },
 
     detached: function() {
-      if (this.ref) {
-        this.ref.off('value', this.__onFirebaseValue, this);
+      var self = this;
+      
+      self._cancelStoredValueTimer();
+      self._cancelFirebaseDocValueTimer();
+      
+      if (self.ref) {
+        self.ref.off('value', self.__onFirebaseValue, self);
       }
     },
 
@@ -139,15 +156,16 @@ https://github.com/firebase/polymerfire/blob/master/LICENSE
     },
 
     getStoredValue: function(path) {
+      var self = this;
       return new Promise(function(resolve, reject) {
-        this.db.ref(path).once('value', function(snapshot) {
+        self.__getStoredValue(path, function(snapshot) {
           var value = snapshot.val();
           if (value == null) {
-            resolve(this.zeroValue);
+            resolve(self.zeroValue);
           }
           resolve(value);
-        }, this.__onError, this);
-      }.bind(this));
+        });
+      }.bind(self));
     },
 
     setStoredValue: function(path, value) {
@@ -160,12 +178,13 @@ https://github.com/firebase/polymerfire/blob/master/LICENSE
       }
 
       if (ref) {
-        ref.on('value', this.__onFirebaseValue, this.__onError, this);
+        ref.on('value', this.__onFirebaseValue, this._onFirebaseDocumentValueError, this);
       }
     },
 
     __onFirebaseValue: function(snapshot) {
       var value = snapshot.val();
+      this._cancelFirebaseDocValueTimer();
 
       if (value == null) {
         value = this.zeroValue;
@@ -196,6 +215,92 @@ https://github.com/firebase/polymerfire/blob/master/LICENSE
             }
           });
         });
+      }
+    },
+    
+    __getStoredValue: function(path, fnSuccess) {
+      var self = this;
+      self.db.ref(path).once('value', function(snapshot) {
+        fnSuccess(snapshot);
+        self._cancelStoredValueTimer();
+      }, function(err) {
+        self._onGetStoredValueError(err, path, fnSuccess);
+      }, self);
+    },
+    
+    /**
+    * Invoked when failed to read data using getStoredValue method 
+    */
+    _onGetStoredValueError: function(err, path, fnSuccess) {
+      var self = this;
+      
+      //If error code is PERMISSION_DENIED and 'retryOnError' is true or 
+      // window.retryDataFromFirebaseOnPermissionDenied is true then retry data from firebase
+      //Start from 1 second to retry data from firebase and each next time use double time to retry data upto 32 seconds.
+      if(err.code == 'PERMISSION_DENIED' && (self.retryOnError || window.retryDataFromFirebaseOnPermissionDenied)) {
+        if(!self._retryStoredValueTime) {
+          self._retryStoredValueTime = 1;
+        }
+        
+        if(self._retryStoredValueTime <= 32) {
+          self._storedValueTimer = self.async(function() {
+            self._retryStoredValueTime *= 2;
+            self.__getStoredValue(path, fnSuccess);
+          }, self._retryStoredValueTime * 1000);
+          return;
+        }
+      }
+      
+      self._cancelStoredValueTimer();
+      self.__onError(err);
+    },
+    
+    /**
+    * Invoked when failed to read data using firebase-document 
+    */
+    _onFirebaseDocumentValueError: function(err) {
+      var self = this;
+      
+      //If error code is PERMISSION_DENIED and 'retryOnError' is true or 
+      // window.retryDataFromFirebaseOnPermissionDenied is true then retry data from firebase
+      //Start from 1 second to retry data from firebase and each next time use double time to retry data upto 32 seconds.
+      if(err.code == 'PERMISSION_DENIED' && (self.retryOnError || window.retryDataFromFirebaseOnPermissionDenied)) {
+        if(!self._retryFirebaseDocValueTime) {
+          self._retryFirebaseDocValueTime = 1;
+        }
+        
+        if(self._retryFirebaseDocValueTime <= 32) {
+          self._firebaseDocValueTimer = self.async(function() {
+            self._retryFirebaseDocValueTime *= 2;
+            self.__refChanged(self.ref, self.ref);
+          }, self._retryFirebaseDocValueTime * 1000);
+          return;
+        }
+      }
+      
+      self._cancelFirebaseDocValueTimer();
+      self.__onError(err);
+    },
+    
+    /**
+    * Cancel timer of read data from firebase using firebase-document
+    */
+    _cancelFirebaseDocValueTimer: function() {
+      var self = this;
+      self._retryFirebaseDocValueTime = 0;
+      if(self._firebaseDocValueTimer) {
+        self.cancelAsync(self._firebaseDocValueTimer);
+      }
+    },
+    
+    /**
+    * Cancel timer of read data from firebase using API
+    */
+    _cancelStoredValueTimer: function() {
+      var self = this;
+      self._retryStoredValueTime = 0;
+      if(self._storedValueTimer) {
+        self.cancelAsync(self._storedValueTimer);
       }
     }
   });
